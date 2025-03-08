@@ -32,13 +32,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
 }
 
-glm::vec3 cameraPos = glm::vec3(0.f, 0.f, 1.f);
-glm::vec3 cameraFront = glm::vec3(0.f, 0.f, -1.f);
-glm::vec3 cameraUp = glm::vec3(0.f, 1.f, -1.f);
-
 
 class Sphere {
-    
     public:
     glm::vec3 pos;
     glm::vec3 vel;
@@ -80,125 +75,174 @@ class Sphere {
 };
 
 // Generate vertex data
-std::vector<float> generateCircleVertices(unsigned int segments) {
+std::vector<float> generateSphereVertices(unsigned int stackCount, unsigned int sectorCount) {
     std::vector<float> vertices;
     
-    // Angle step per segment
-    float angleStep = 2.0f * M_PI / segments;
+    float sectorStep = 2.f * M_PI / sectorCount;
+    float stackStep = M_PI / stackCount;
 
-    for (size_t i = 0; i <= segments; i++) {
-        float theta = M_PI * (float)i/segments;
-        //float theta1 = (i+1)/segments * glm::pi<float>();
+    for (size_t i = 0; i <= stackCount; i++) {
+        float stackAngle = i * stackStep;
+        float xy = sinf(stackAngle);
+        float z = cosf(stackAngle);
 
-        for (size_t j = 0; j < segments; j++) {
-            float phi = 2.f * M_PI * (float)j/segments;
+        // Add (sectorCount+1) vertices per stack
+        // First and last vertices have same position and normal, but different tex coords.
 
-            float x = cos(phi)*sin(theta);
-            float y = sin(phi)*sin(theta);
-            float z = cos(theta);
+        for (size_t j = 0; j <= sectorCount; j++) {
+            float sectorAngle = M_PI / 2 - j * sectorStep;
+
+            // vertex position
+            float x = xy * cosf(sectorAngle);
+            float y = xy * sinf(sectorAngle);
 
             vertices.push_back(x);
             vertices.push_back(y);
             vertices.push_back(z);
-
-            // Add simple color (gradient based on latitude)
-            float r = sin(phi);
-            float g = cos(theta);
-            float b = sin(theta);
-            vertices.push_back(r);
-            vertices.push_back(g);
-            vertices.push_back(b);
-
         }
-        //float angle = i * angleStep;
-        // Relative to (0,0,0), unit circle
-        //float x = cos(angle);
-        //float y = sin(angle);
-        
-        //vertices.push_back(x);
-        //vertices.push_back(y);
-        //vertices.push_back(0.0f); // Z = 0
-        
-        // Add color (Change to your preferred color logic)
-        //float r = 0.5f + 0.5f * cos(angle); // Example: gradient color
-        //float g = 0.5f + 0.5f * sin(angle);
-        //float b = 1.0f;
-        //vertices.push_back(r);
-        //vertices.push_back(g);
-        //vertices.push_back(b);
     }
     return vertices;
 }
 
-std::vector<unsigned int> generateSphereIndices(unsigned int segments) {
-    std::vector<unsigned int> indices;
+void generateSphereIndices(unsigned int stackCount, unsigned int sectorCount, std::vector<unsigned int>& indices, std::vector<unsigned int>& lineIndices) {
+    for (int i = 0; i < stackCount; ++i) {
+        int k1 = i * (sectorCount + 1); // beginning of current stack
+        int k2 = k1 + sectorCount + 1; // beginning of next stack
 
-    for (unsigned int lat = 0; lat < segments; ++lat) {
-        for (unsigned int lon = 0; lon < segments; ++lon) {
-            unsigned int current = lat * (segments + 1) + lon;
-            unsigned int next = current + segments + 1;
+        for (int j = 0; j < sectorCount; ++j, ++k1, ++k2) {
+            // 2 triangles per sector excluding first and last stacks.
 
             // Triangle 1
-            indices.push_back(current);
-            indices.push_back(next);
-            indices.push_back(current + 1);
+            if (i != 0) {
+                indices.push_back(k1);
+                indices.push_back(k2);
+                indices.push_back(k1 + 1);
+            }
 
             // Triangle 2
-            indices.push_back(current + 1);
-            indices.push_back(next);
-            indices.push_back(next + 1);
+            if (i != stackCount - 1) {
+                indices.push_back(k1 + 1);
+                indices.push_back(k2);
+                indices.push_back(k2 + 1);
+            }
+
+            // indices for lines
+            // vertical lines for all stacks
+            lineIndices.push_back(k1);
+            lineIndices.push_back(k2);
+
+            if (i != 0) {
+                lineIndices.push_back(k1);
+                lineIndices.push_back(k1 + 1);
+            }
         }
     }
-
-    return indices;
 }
 
-const int WIDTH = 600;
-const int HEIGHT = 600;
+const int WIDTH = 1920;
+const int HEIGHT = 1080;
 
-// Generate VAO & VBO
+// Vertex Buffer Object and Vertex Array Object
 unsigned int VAO, VBO;
-unsigned int EBO;
+unsigned int EBO, EBO_LINES;
 
-void initVAOVBO(std::vector<float> &sphereVertices, std::vector<unsigned int> &sphereIndices) {
+void initVAOVBO(std::vector<float> &sphereVertices, std::vector<unsigned int> &sphereIndices, std::vector<unsigned int> &sphereLineIndices) {
+    // Generate VAO and bind it
     glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
-    //
-    glGenBuffers(1, &EBO);
-
     glBindVertexArray(VAO);
-
-    // Load vertex data
+    // Generate VBO
+    glGenBuffers(1, &VBO);
+    // Bind the VBO buffer to the GL_ARRAY_BUFFER target
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    // Buffer call on the bound buffer (VBO) to copy vertex data into its memory
     glBufferData(GL_ARRAY_BUFFER, sphereVertices.size() * sizeof(float), sphereVertices.data(), GL_STATIC_DRAW);
 
-    // Load index data
+    // Load index data into an EBO
+    glGenBuffers(1, &EBO);
+    // Appropriate target for index data
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereIndices.size() * sizeof(unsigned int), sphereIndices.data(), GL_STATIC_DRAW);
 
-    // Position attribute (location = 0 in shader)
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glGenBuffers(1, &EBO_LINES);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO_LINES);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sphereLineIndices.size() * sizeof(unsigned int), sphereLineIndices.data(), GL_STATIC_DRAW);
+
+    // Interpret vertex data determined by object bound to GL_ARRAY_BUFFER (VBO)
+    // Position attribute (location = 0 in shader). Vertex is vec3 (floats). No input data normalization
+    // Array is tightly packed
+    // 5th argument is 'stride'. Tells the space between consecutive vertex attributes
+    // Position data are 6 * sizeof(float) apart in the array (triangle, color)
+    // 6th argument is offset of (position) data in the buffer. Position data is at start of the buffer
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    // Enable it
     glEnableVertexAttribArray(0);
 
     // Color attribute (location = 1 in shader)
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
+    // Starts after position data in vertex buffer; appropriate offset
+    //glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    //glEnableVertexAttribArray(1);
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    // Unbind VAO, VBO
     glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-float cameraSpeed = 0.05f;
+// Simple camera structure
+struct Camera {
+    float orientationSpeed = 0.005f;
+    float yaw = -90.0f;
+    float pitch = 0.0f;
+    float lastX = WIDTH / 2.f;
+    float lastY = HEIGHT / 2.f;
+    glm::vec3 pos = glm::vec3(0.f, 0.f, 1.f);
+    glm::vec3 front = glm::vec3(0.f, 0.f, -1.f);
+    glm::vec3 up = glm::vec3(0.f, 1.f, -1.f);
+    bool firstMouse = true;
+};
 
-void processInput(GLFWwindow *window) {
+void processInput(GLFWwindow *window, Camera* camera) {
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        cameraPos += cameraSpeed * cameraFront;
+        camera->pos += camera->orientationSpeed * camera->front;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        cameraPos -= cameraSpeed * cameraFront;
+        camera->pos -= camera->orientationSpeed * camera->front;
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+        camera->pos -= glm::normalize(glm::cross(camera->front, camera->up)) * camera->orientationSpeed;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+        camera->pos += glm::normalize(glm::cross(camera->front, camera->up)) * camera->orientationSpeed;
+}
+
+// Mouse orienting callback
+void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    // Retrieve the user pointer
+    Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
+    
+    if (camera->firstMouse) { // Prevent a jump when first moving the mouse
+        camera->lastX = xpos;
+        camera->lastY = ypos;
+        camera->firstMouse = false;
+    }
+    float xoffset = xpos - camera->lastX;
+    float yoffset = camera->lastY - ypos; // Reversed since y-coordinates go from bottom to top
+    camera->lastX = xpos;
+    camera->lastY = ypos;
+
+    float sensitivity = 0.1f;
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    camera->yaw += xoffset;
+    camera->pitch += yoffset;
+
+    // Constrain pitch to prevent flipping
+    if (camera->pitch > 89.0f) camera->pitch = 89.0f;
+    if (camera->pitch < -89.0f) camera->pitch = -89.0f;
+
+    // Update `cameraFront`
+    glm::vec3 front;
+    front.x = cos(glm::radians(camera->yaw)) * cos(glm::radians(camera->pitch));
+    front.y = sin(glm::radians(camera->pitch));
+    front.z = sin(glm::radians(camera->yaw)) * cos(glm::radians(camera->pitch));
+    camera->front = glm::normalize(front);
 }
 
 int main() {
@@ -212,7 +256,11 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "OpenGL Window", nullptr, nullptr);
+    // Window
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+
+    GLFWwindow* window = glfwCreateWindow(mode->width, mode->height, "OpenGL Window", monitor, nullptr);
     if (window == NULL) {
         std::cerr << "Failed to create GLFW window\n";
         glfwTerminate();
@@ -228,46 +276,60 @@ int main() {
         return -1;
     }
 
-    int segments = 100;
-
-    glm::vec3 initPos1(0.f, 0.f, 0.f);
-    glm::vec3 initPos2(0.7f, 0.2f, 0.f);
-
-    std::vector<Sphere> circles = {
-        Sphere(glm::vec3{0,0,0}, glm::vec3{0,-0.2f,0}, 0.1f, 7.35E17),
-        Sphere(glm::vec3{0.7f,0.2f,0}, glm::vec3{0,0.2f,0}, 0.07f, 7.35E17),
-        Sphere(glm::vec3{-0.8f,0.3f,0}, glm::vec3{0.1f,0.1f,0}, 0.04f, 7.35E17),
-
+    std::vector<Sphere> spheres = {
+        Sphere(glm::vec3{0,0,0}, glm::vec3{0,0,0}, 0.3f, 7.35E17)
     };
 
     int shaderProgram = createShaderProgram("vertex_shader.glsl", "fragment_shader.glsl");
-    glUseProgram(shaderProgram);
 
-    std::vector<float> circleVertices = generateCircleVertices(50);
-    std::vector<unsigned int> sphereIndices = generateSphereIndices(50);
-    initVAOVBO(circleVertices, sphereIndices);
-    
-    glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+    int sectorCount = 18;
+    int stackCount = 9;
+    std::vector<unsigned int> sphereIndices;
+    std::vector<unsigned int> sphereLineIndices;
+
+    std::vector<float> sphereVertices = generateSphereVertices(stackCount, sectorCount);
+    generateSphereIndices(stackCount, sectorCount, sphereIndices, sphereLineIndices);
+
+    initVAOVBO(sphereVertices, sphereIndices, sphereLineIndices);
+
+    // Create a camera and set the window's user pointer to this.
+    // Is done since 'glfwSetCursorPosCallback' signature limits argument list to this callback only.
+    Camera camera;
+    glfwSetWindowUserPointer(window, &camera);
+
+    glm::mat4 view = glm::lookAt(camera.pos, camera.pos + camera.front, camera.up);
+    glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float)WIDTH / HEIGHT, 0.1f, 100.0f);
+
+    // Get view location in a shader program
+    int projLoc = glGetUniformLocation(shaderProgram, "projection");
     int viewLoc = glGetUniformLocation(shaderProgram, "view");
 
     auto lastTime = std::chrono::high_resolution_clock::now();
     auto currentTime = lastTime;
 
-    float angle = 0;
+    // Bind callback
+    glfwSetCursorPosCallback(window, mouse_callback);
 
-    // Main loop
+    glUseProgram(shaderProgram);
+
     while (!glfwWindowShouldClose(window)) {
-
-        processInput(window);
-
         currentTime = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float> dt = currentTime - lastTime;
         lastTime = currentTime;
 
+        processInput(window, &camera);
+
+        // Update transformation matrix
+        view = glm::lookAt(camera.pos, camera.pos + camera.front, camera.up);
+        projection = glm::perspective(glm::radians(45.0f), (float)WIDTH / HEIGHT, 0.1f, 100.0f);
+        // Send it to shader
+        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        for (auto &circle : circles)
+        for (auto &circle : spheres)
         {
             // Transformation matrix
             glm::mat4 model = glm::mat4(1.0f);
@@ -279,25 +341,16 @@ int main() {
 
             int radiusLoc = glGetUniformLocation(shaderProgram, "radius");
             glUniform1f(radiusLoc, circle.radius); // Send radius to shader
-            
-            angle += dt.count() * 0.5f;
-
-
-            view = glm::lookAt(cameraPos, glm::vec3(0,0,0), glm::vec3(0,1,0));
-
-            glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
 
             circle.acc = glm::vec3(0.f);
 
-            for (auto &circle2 : circles) {
+            for (auto &circle2 : spheres) {
                 if (&circle == &circle2) continue;
 
                 glm::vec3 dr = circle2.pos - circle.pos;
                 float dist = glm::length(dr);
                 
-                
                 if (dist < circle.radius + circle2.radius) {
-                    std::cout << "COL" << std::endl;
                     float overlap = circle.radius + circle2.radius - dist;
                     glm::vec3 correction = dr/dist * (overlap * 0.5f);
 
@@ -314,14 +367,20 @@ int main() {
             circle.updatePos(dt.count());
 
             glBindBuffer(GL_ARRAY_BUFFER, VBO);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, circleVertices.size() * sizeof(float), circleVertices.data());
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sphereVertices.size() * sizeof(float), sphereVertices.data());
 
+            // Draw sphere (wireframe). Bind VAO first
             glBindVertexArray(VAO);
-            glDrawElements(GL_TRIANGLES, circleVertices.size(), GL_UNSIGNED_INT, 0); // Equivalent of glBegin(GL_TRIANGLES) + glVertex3f calls
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+            glDrawElements(GL_TRIANGLES, sphereIndices.size(), GL_UNSIGNED_INT, (void*)0);
+            //glDrawElements(GL_LINES, sphereLineIndices.size(), GL_UNSIGNED_INT, (void*)0);
+
+            // unbind VAO
+            glBindVertexArray(0);
         }
         
         glfwSwapBuffers(window);
-        glfwPollEvents(); // Input events
+        glfwPollEvents(); // IO events
     }
 
     // Cleanup

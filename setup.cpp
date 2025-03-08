@@ -6,6 +6,7 @@
 
 #include "setup.hpp"
 
+// Utility to read a shader into a string
 std::string readShader(const std::string& path) {
     std::ifstream shaderFile(path);
     if (!shaderFile) {
@@ -18,6 +19,7 @@ std::string readShader(const std::string& path) {
     return ss.str();
 }
 
+// Check compile-time errors
 void checkShaderCompileErrors(unsigned int shader, const char* flag) {
     int success;
     char infoLog[1024];
@@ -38,6 +40,7 @@ void checkShaderCompileErrors(unsigned int shader, const char* flag) {
     }
 }
 
+// Assemble shader
 int createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     std::string vShaderSrc = readShader(vertexSrc);
     std::string fShaderSrc = readShader(fragmentSrc);
@@ -45,8 +48,11 @@ int createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     const char* vShaderCode = vShaderSrc.c_str();
     const char* fShaderCode = fShaderSrc.c_str();
 
+    // Create vertex shader object
     unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    // Attach shader source code to object (1 string)
     glShaderSource(vertexShader, 1, &vShaderCode, NULL);
+    // Compile shader
     glCompileShader(vertexShader);
     checkShaderCompileErrors(vertexShader, "VERTEX");
 
@@ -55,8 +61,9 @@ int createShaderProgram(const char* vertexSrc, const char* fragmentSrc) {
     glCompileShader(fragmentShader);
     checkShaderCompileErrors(fragmentShader, "FRAGMENT");
 
-    // Link shaders into a program
+    // Link shaders into a program object
     unsigned int shaderProgram = glCreateProgram();
+
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
